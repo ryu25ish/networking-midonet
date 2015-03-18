@@ -1,11 +1,11 @@
-# Copyright 2013 VMware, Inc.  All rights reserved.
-# Copyright 2014 Midokura SARL.  All rights reserved.
+# Copyright (C) 2015 Midokura SARL
+# All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
 #
-#         http://www.apache.org/licenses/LICENSE-2.0
+#        http://www.apache.org/licenses/LICENSE-2.0
 #
 #    Unless required by applicable law or agreed to in writing, software
 #    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -13,39 +13,42 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron.api import extensions
+from oslo_log import log as logging
 
-ROUTER_ID = 'router_id'
+LOG = logging.getLogger(__name__)
+
+
 EXTENDED_ATTRIBUTES_2_0 = {
     'pools': {
-        ROUTER_ID: {'allow_post': True, 'allow_put': False,
-                    'validate': {'type:uuid_or_none': None},
-                    'default': None, 'is_visible': True},
+        'router_id': {'allow_post': False, 'allow_put': False,
+                      'is_visible': True},
     }
 }
 
 
-class Routedserviceinsertion(object):
-    """Extension class supporting routed service type."""
-
+class Loadbalancer_router_insertion(extensions.ExtensionDescriptor):
+    """Extension class supporting LB Pool and Router association."""
     @classmethod
     def get_name(cls):
-        return "Routed Service Insertion"
+        return "Loadbalancer Router insertion"
 
     @classmethod
     def get_alias(cls):
-        return "routed-service-insertion"
+        return "lbaasrouterinsertion"
 
     @classmethod
     def get_description(cls):
-        return "Provides routed service type"
+        return "Loadbalancer Router insertion on a specified router"
 
     @classmethod
     def get_namespace(cls):
-        return ""
+        return ("http://docs.openstack.org/ext/neutron/lbaasrouterinsertion"
+                "/api/v1.0")
 
     @classmethod
     def get_updated(cls):
-        return "2014-12-25T00:00:00-00:00"
+        return "2015-04-11T10:00:00-00:00"
 
     def get_extended_resources(self, version):
         if version == "2.0":
