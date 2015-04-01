@@ -19,10 +19,21 @@ from midonet.neutron.db import loadbalancer_router_insertion_db  # noqa
 from midonet.neutron.extensions import loadbalancer_router_insertion as lri
 from midonet.neutron.tests.unit import test_midonet_plugin as test_mn
 
+from neutron.api import extensions as api_ext
+import neutron.extensions as nextensions
+from neutron.plugins.common import constants
 from neutron.tests.unit.api import test_extensions as test_ex
 from neutron.tests.unit.extensions import test_l3
+from neutron_lbaas import extensions
 from neutron_lbaas.extensions import loadbalancer
-from neutron_lbaas.tests.unit.db.loadbalancer import test_db_loadbalancer
+import neutron_lbaas.tests.unit.db.loadbalancer.test_db_loadbalancer as test_lb
+from oslo_config import cfg
+from neutron.api.v2 import attributes
+from neutron.extensions import l3
+
+PLUGIN_NAME = ('midonet.neutron.services.loadbalancer.plugin.'
+               'LoadBalancerPlugin')
+extensions_path = ':'.join(extensions.__path__ + nextensions.__path__)
 
 
 class LoadbalancerTestExtensionManager(test_l3.L3TestExtensionManager):
@@ -40,16 +51,24 @@ class LoadbalancerTestExtensionManager(test_l3.L3TestExtensionManager):
         return []
 
 
-class LoadbalancerTestCase(test_db_loadbalancer.LoadBalancerTestMixin,
-                           test_mn.MidonetPluginV2TestCase,
+class LoadbalancerTestCase(test_mn.MidonetPluginV2TestCase,
+                           test_lb.LoadBalancerTestMixin,
                            test_l3.L3NatTestCaseMixin):
 
     def setUp(self, core_plugin=None, lb_plugin=None, lbaas_provider=None,
               ext_mgr=None):
 
-        super(LoadbalancerTestCase, self).setUp()
+        cfg.CONF.set_override('api_extensions_path', extensions_path)
         ext_mgr = LoadbalancerTestExtensionManager()
-        self.ext_api = test_ex.setup_extensions_middleware(ext_mgr)
+
+        #ext_mgr = extensions.PluginAwareExtensionManager(
+        #     extensions_path,
+        #     {constants.LOADBALANCER: PLUGIN_NAME}
+        #)
+        super(LoadbalancerTestCase, self).setUp(
+            ext_mgr=ext_mgr,
+            service_plugins={'lb_plugin_name': PLUGIN_NAME}
+        )
 
         # Subnet and router must always exist and associated
         network = self._make_network(self.fmt, 'net1', True)

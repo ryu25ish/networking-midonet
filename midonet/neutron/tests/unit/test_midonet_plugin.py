@@ -66,17 +66,19 @@ class MidonetPluginConf(object):
 
 class MidonetPluginV2TestCase(test_plugin.NeutronDbPluginV2TestCase):
 
-    def setup_parent(self):
+    def setup_parent(self, ext_mgr=None, service_plugins=None):
         # Ensure that the parent setup can be called without arguments
         # by the common configuration setUp.
         parent_setup = functools.partial(
             super(MidonetPluginV2TestCase, self).setUp,
-            plugin=MidonetPluginConf.plugin_name
+            plugin=MidonetPluginConf.plugin_name,
+            ext_mgr=ext_mgr,
+            service_plugins=service_plugins
         )
         MidonetPluginConf.setUp(self, parent_setup)
 
-    def setUp(self):
-        self.setup_parent()
+    def setUp(self, ext_mgr=None, service_plugins=None):
+        self.setup_parent(ext_mgr=ext_mgr, service_plugins=service_plugins)
 
 
 class TestMidonetNetworksV2(MidonetPluginV2TestCase,

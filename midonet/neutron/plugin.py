@@ -19,7 +19,6 @@
 from midonet.neutron.common import config  # noqa
 from midonet.neutron.db import agent_membership_db as am_db
 from midonet.neutron.db import db_util
-from midonet.neutron.db import loadbalancer_router_insertion_db as lbri_db
 from midonet.neutron.db import port_binding_db as pb_db
 from midonet.neutron.db import task_db as task
 from midonet.neutron import extensions
@@ -45,8 +44,6 @@ from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.extensions import portbindings
 from neutron.extensions import securitygroup as ext_sg
 from neutron import i18n
-from neutron.plugins.common import constants
-from neutron_lbaas.db.loadbalancer import loadbalancer_db
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
@@ -63,17 +60,13 @@ class MidonetMixin(agentschedulers_db.DhcpAgentSchedulerDbMixin,
                    extradhcpopt_db.ExtraDhcpOptMixin,
                    extraroute_db.ExtraRoute_db_mixin,
                    l3_gwmode_db.L3_NAT_db_mixin,
-                   lbri_db.LoadbalancerRouterInsertionDbMixin,
-                   loadbalancer_db.LoadBalancerPluginDb,
                    pb_db.MidonetPortBindingMixin,
                    portbindings_db.PortBindingMixin,
                    securitygroups_db.SecurityGroupDbMixin):
 
     supported_extension_aliases = ['agent-membership',
                                    'extra_dhcp_opt',
-                                   'extraroute',
-                                   'lbaas',
-                                   'lbaasrouterinsertion']
+                                   'extraroute']
 
     def __init__(self):
         super(MidonetMixin, self).__init__()
@@ -563,255 +556,6 @@ class MidonetMixin(agentschedulers_db.DhcpAgentSchedulerDbMixin,
 
         LOG.debug("MidonetMixin.delete_security_group_rule exiting: id=%r",
                   id)
-
-    def _validate_vip_subnet(self, context, subnet_id, pool_id):
-        # ensure that if the vip subnet is public, the router has its
-        # gateway set.
-        subnet = self._get_subnet(context, subnet_id)
-        if db_util.is_subnet_external(context, subnet):
-            router_id = db_util.get_router_from_pool(context, pool_id)
-            # router_id should never be None because it was already validated
-            # when we created the pool
-            assert router_id is not None
-
-            router = self._get_router(context, router_id)
-            if router.get('gw_port_id') is None:
-                msg = (_LE("The router must have its gateway set if the "
-                           "VIP subnet is external"))
-                raise n_exc.BadRequest(resource='router', msg=msg)
-
-    def create_vip(self, context, vip):
-        LOG.debug("MidonetMixin.create_vip called: %(vip)r",
-                  {'vip': vip})
-        with context.session.begin(subtransactions=True):
-
-            self._validate_vip_subnet(context, vip['vip']['subnet_id'],
-                                      vip['vip']['pool_id'])
-
-            v = super(MidonetMixin, self).create_vip(context, vip)
-            task.create_task(context, task.CREATE, data_type=task.VIP,
-                             resource_id=v['id'], data=v)
-            v['status'] = constants.ACTIVE
-            self.update_status(context, loadbalancer_db.Vip, v['id'],
-                               v['status'])
-
-        LOG.debug("MidonetMixin.create_vip exiting: id=%r", v['id'])
-        return v
-
-    def delete_vip(self, context, id):
-        LOG.debug("MidonetMixin.delete_vip called: id=%(id)r",
-                  {'id': id})
-
-        with context.session.begin(subtransactions=True):
-            super(MidonetMixin, self).delete_vip(context, id)
-            task.create_task(context, task.DELETE, data_type=task.VIP,
-                             resource_id=id)
-
-        LOG.debug("MidonetMixin.delete_vip existing: id=%(id)r",
-                  {'id': id})
-
-    def update_vip(self, context, id, vip):
-        LOG.debug("MidonetMixin.update_vip called: id=%(id)r, "
-                  "vip=%(vip)r", {'id': id, 'vip': vip})
-
-        with context.session.begin(subtransactions=True):
-            v = super(MidonetMixin, self).update_vip(context, id, vip)
-            task.create_task(context, task.UPDATE, data_type=task.VIP,
-                             resource_id=id, data=v)
-
-        LOG.debug("MidonetMixin.update_vip exiting: id=%(id)r, "
-                  "vip=%(vip)r", {'id': id, 'vip': v})
-        return v
-
-    def _update_pool_router_dict(self, context, pool):
-        pool_router = self.get_pool_router(context, pool['id'])
-        if pool_router:
-            pool['router_id'] = pool_router['router_id']
-
-    def create_pool(self, context, pool):
-        LOG.debug("MidonetMixin.create_pool called: %(pool)r", {'pool': pool})
-
-        subnet = db_util.get_subnet(context, pool['pool']['subnet_id'])
-        if subnet is None:
-            msg = (_LE("subnet does not exist"))
-            raise n_exc.BadRequest(resource='pool', msg=msg)
-
-        if db_util.is_subnet_external(context, subnet):
-            msg = (_LE("pool subnet must not be public"))
-            raise n_exc.BadRequest(resource='subnet', msg=msg)
-
-        router_id = db_util.get_router_from_subnet(context, subnet)
-
-        if not router_id:
-            msg = (_LE("pool subnet must be associated with router"))
-            raise n_exc.BadRequest(resource='router', msg=msg)
-
-        pool['pool'].update({'router_id': router_id})
-        self.validate_pool_router_not_in_use(context, router_id)
-
-        with context.session.begin(subtransactions=True):
-            p = super(MidonetMixin, self).create_pool(context, pool)
-            self.create_pool_router(context, {'pool_id': p['id'],
-                                              'router_id': router_id})
-            p['router_id'] = router_id
-            p['status'] = constants.ACTIVE
-            self.update_status(context, loadbalancer_db.Pool, p['id'],
-                               p['status'])
-
-            task.create_task(context, task.CREATE, data_type=task.POOL,
-                             resource_id=p['id'], data=p)
-
-        LOG.debug("MidonetMixin.create_pool exiting: %(pool)r", {'pool': p})
-        return p
-
-    def get_pool(self, context, id, fields=None):
-        LOG.debug("MidonetMixin.get_pool called: id=%(id)r", {'id': id})
-
-        pool = super(MidonetMixin, self).get_pool(context, id)
-        self._update_pool_router_dict(context, pool)
-        return pool
-
-    def update_pool(self, context, id, pool):
-        LOG.debug("MidonetMixin.update_pool called: id=%(id)r, pool=%(pool)r",
-                  {'id': id, 'pool': pool})
-
-        with context.session.begin(subtransactions=True):
-            p = super(MidonetMixin, self).update_pool(context, id, pool)
-            task.create_task(context, task.UPDATE, data_type=task.POOL,
-                             resource_id=id, data=p)
-
-        self._update_pool_router_dict(context, p)
-
-        LOG.debug("MidonetMixin.update_pool exiting: id=%(id)r, pool=%(pool)r",
-                  {'id': id, 'pool': p})
-        return p
-
-    def delete_pool(self, context, id):
-        LOG.debug("MidonetMixin.delete_pool called: %(id)r", {'id': id})
-
-        with context.session.begin(subtransactions=True):
-            self.delete_pool_router(context, id)
-            super(MidonetMixin, self).delete_pool(context, id)
-            task.create_task(context, task.DELETE, data_type=task.POOL,
-                             resource_id=id)
-
-        LOG.debug("MidonetMixin.delete_pool exiting: %(id)r", {'id': id})
-
-    def create_member(self, context, member):
-        LOG.debug("MidonetMixin.create_member called: %(member)r",
-                  {'member': member})
-
-        with context.session.begin(subtransactions=True):
-            m = super(MidonetMixin, self).create_member(context, member)
-            task.create_task(context, task.CREATE, data_type=task.MEMBER,
-                             resource_id=m['id'], data=m)
-            m['status'] = constants.ACTIVE
-            self.update_status(context, loadbalancer_db.Member, m['id'],
-                               m['status'])
-
-        LOG.debug("MidonetMixin.create_member exiting: %(member)r",
-                  {'member': m})
-        return m
-
-    def update_member(self, context, id, member):
-        LOG.debug("MidonetMixin.update_member called: id=%(id)r, "
-                  "member=%(member)r", {'id': id, 'member': member})
-
-        with context.session.begin(subtransactions=True):
-            m = super(MidonetMixin, self).update_member(context, id, member)
-            task.create_task(context, task.UPDATE, data_type=task.MEMBER,
-                             resource_id=id, data=m)
-
-        LOG.debug("MidonetMixin.update_member exiting: id=%(id)r, "
-                  "member=%(member)r", {'id': id, 'member': m})
-        return m
-
-    def delete_member(self, context, id):
-        LOG.debug("MidonetMixin.delete_member called: %(id)r", {'id': id})
-
-        with context.session.begin(subtransactions=True):
-            super(MidonetMixin, self).delete_member(context, id)
-            task.create_task(context, task.DELETE,
-                             data_type=task.MEMBER, resource_id=id)
-
-        LOG.debug("MidonetMixin.delete_member exiting: %(id)r", {'id': id})
-
-    def create_health_monitor(self, context, health_monitor):
-        LOG.debug("MidonetMixin.create_health_monitor called: "
-                  " %(health_monitor)r", {'health_monitor': health_monitor})
-
-        with context.session.begin(subtransactions=True):
-            hm = super(MidonetMixin, self).create_health_monitor(
-                context, health_monitor)
-            task.create_task(context, task.CREATE,
-                             data_type=task.HEALTH_MONITOR,
-                             resource_id=hm['id'], data=hm)
-
-        LOG.debug("MidonetMixin.create_health_monitor exiting: "
-                  "%(health_monitor)r", {'health_monitor': hm})
-        return hm
-
-    def update_health_monitor(self, context, id, health_monitor):
-        LOG.debug("MidonetMixin.update_health_monitor called: id=%(id)r, "
-                  "health_monitor=%(health_monitor)r",
-                  {'id': id, 'health_monitor': health_monitor})
-
-        with context.session.begin(subtransactions=True):
-            hm = super(MidonetMixin, self).update_health_monitor(
-                context, id, health_monitor)
-            task.create_task(context, task.UPDATE,
-                             data_type=task.HEALTH_MONITOR,
-                             resource_id=id, data=hm)
-
-        LOG.debug("MidonetMixin.update_health_monitor exiting: id=%(id)r, "
-                  "health_monitor=%(health_monitor)r",
-                  {'id': id, 'health_monitor': hm})
-        return hm
-
-    def delete_health_monitor(self, context, id):
-        LOG.debug("MidonetMixin.delete_health_monitor called: %(id)r",
-                  {'id': id})
-
-        with context.session.begin(subtransactions=True):
-            super(MidonetMixin, self).delete_health_monitor(context, id)
-            task.create_task(context, task.DELETE,
-                             data_type=task.HEALTH_MONITOR, resource_id=id)
-
-        LOG.debug("MidonetMixin.delete_health_monitor exiting: %(id)r",
-                  {'id': id})
-
-    def create_pool_health_monitor(self, context, health_monitor, pool_id):
-        LOG.debug("MidonetMixin.create_pool_health_monitor called: "
-                  "hm=%(health_monitor)r, pool_id=%(pool_id)r",
-                  {'health_monitor': health_monitor, 'pool_id': pool_id})
-
-        pool = self.get_pool(context, pool_id)
-        monitors = pool.get('health_monitors')
-        if len(monitors) > 0:
-            msg = (_LE("MidoNet right now can only support one monitor per "
-                       "pool"))
-            raise n_exc.BadRequest(resource='pool_health_monitor', msg=msg)
-
-        with context.session.begin(subtransactions=True):
-            monitors = super(MidonetMixin, self).create_pool_health_monitor(
-                context, health_monitor, pool_id)
-
-        LOG.debug("MidonetMixin.create_pool_health_monitor exiting: "
-                  "%(health_monitor)r, %(pool_id)r",
-                  {'health_monitor': health_monitor, 'pool_id': pool_id})
-        return monitors
-
-    def delete_pool_health_monitor(self, context, id, pool_id):
-        LOG.debug("MidonetMixin.delete_pool_health_monitor called: "
-                  "id=%(id)r, pool_id=%(pool_id)r",
-                  {'id': id, 'pool_id': pool_id})
-
-        with context.session.begin(subtransactions=True):
-            super(MidonetMixin, self).delete_pool_health_monitor(
-                context, id, pool_id)
-
-        LOG.debug("MidonetMixin.delete_pool_health_monitor exiting: "
-                  "%(id)r, %(pool_id)r", {'id': id, 'pool_id': pool_id})
 
     def create_agent_membership(self, context, agent_membership):
         LOG.debug("MidonetMixin.create_agent_membership called: "
