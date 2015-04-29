@@ -15,15 +15,19 @@
 
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
+from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
 from neutron.db import models_v2
 from neutron import i18n
+from neutron_lbaas.db.loadbalancer import loadbalancer_db as ldb
 from sqlalchemy.orm import exc
 
 _LE = i18n._LE
 
 
-class LoadBalancerMixin(object):
+class LoadBalancerMixin(db_base_plugin_v2.NeutronDbPluginV2,
+                        l3_db.L3_NAT_dbonly_mixin,
+                        ldb.LoadBalancerPluginDb):
 
     def _check_and_get_router_id_for_pool(self, context, subnet_id):
 
@@ -79,8 +83,8 @@ class LoadBalancerMixin(object):
         return network.external
 
     def _validate_vip_subnet(self, context, vip):
-        subnet = self._get_subnet(context, vip['vip']['subnet_id'])
-        pool = self.get_pool(context, vip['vip']['pool_id'])
+        subnet = self._get_subnet(context, vip['subnet_id'])
+        pool = self.get_pool(context, vip['pool_id'])
 
         # VIP and pool must not be on the same subnet
         if pool['subnet_id'] == subnet['id']:
@@ -103,3 +107,14 @@ class LoadBalancerMixin(object):
             msg = (_LE("The router must have its gateway set if the "
                        "VIP subnet is external"))
             raise n_exc.BadRequest(resource='vip', msg=msg)
+
+    def _validate_pool_hm_assoc(self, context, pool_id, hm_id):
+        pool = self.get_pool(context, pool_id)
+        assoc = next((x for x in pool['health_monitors'] if x != hm_id), None)
+
+        # There is an association with a different health monitor
+        if assoc:
+            msg = (_LE("The pool is already associated with a different health "
+                       "monitor"))
+            raise n_exc.BadRequest(resource='pool_monitor_association',
+                                   msg=msg)

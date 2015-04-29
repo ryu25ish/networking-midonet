@@ -20,12 +20,21 @@ MIDONET_ENABLE_Q_SVC_ONLY=${MIDONET_ENABLE_Q_SVC_ONLY:-False}
 
 # Disable nova-network and enable neutron services
 disable_service n-net
-disable_service q-lbaas
 disable_service q-fwaas
 disable_service q-l3
 disable_service q-agt
 disable_service q-vpn
 enable_service q-svc
+
+# LBaaS is implemented as a service driver only for the new version of the
+# midonet plugin that is based on the cluster.
+if [ "$USE_CLUSTER" == "True" ]; then
+    enable_service q-lbaas
+else
+    disable_service q-lbaas
+fi
+
+NEUTRON_LBAAS_SERVICE_PROVIDERV1="LOADBALANCER:Midonet:midonet.neutron.services.loadbalancer.driver.MidonetLoadbalancerDriver:default"
 
 if [ "$MIDONET_ENABLE_Q_SVC_ONLY" == "True" ]; then
     Q_AUTH_STRATEGY=noauth

@@ -18,11 +18,17 @@ import webob.exc
 from midonet.neutron.tests.unit import test_midonet_plugin as test_mn
 from midonet.neutron.tests.unit import test_midonet_plugin_api as test_mn_api
 
+from neutron.plugins.common import constants
 from neutron.tests.unit.api import test_extensions as test_ex
 from neutron.tests.unit.extensions import test_l3
 from neutron_lbaas.extensions import loadbalancer
+from neutron_lbaas.services.loadbalancer import plugin as lb_plugin
 from neutron_lbaas.tests.unit.db.loadbalancer import test_db_loadbalancer
+from oslo_config import cfg
 from oslo_utils import uuidutils
+
+MN_DRIVER_KLASS = ('midonet.neutron.services.loadbalancer.driver.'
+                   'MidonetLoadbalancerDriver')
 
 
 class LoadbalancerTestExtensionManager(test_l3.L3TestExtensionManager):
@@ -41,10 +47,9 @@ class LoadbalancerTestExtensionManager(test_l3.L3TestExtensionManager):
 class LoadbalancerTestCase(test_db_loadbalancer.LoadBalancerTestMixin,
                            test_l3.L3NatTestCaseMixin):
 
-    def setUp(self, core_plugin=None, lb_plugin=None, lbaas_provider=None,
-              ext_mgr=None):
-
-        super(LoadbalancerTestCase, self).setUp()
+    def setUp(self, service_plugins=None):
+        super(LoadbalancerTestCase, self).setUp(
+            service_plugins=service_plugins)
         ext_mgr = LoadbalancerTestExtensionManager()
         self.ext_api = test_ex.setup_extensions_middleware(ext_mgr)
 
@@ -203,10 +208,23 @@ class LoadbalancerTestCase(test_db_loadbalancer.LoadBalancerTestMixin,
 class LoadbalancerClusterTestCase(LoadbalancerTestCase,
                                   test_mn.MidonetPluginV2TestCase):
 
-    pass
+    def setUp(self, core_plugin=None, lb_plugin=None, lbaas_provider=None,
+              ext_mgr=None):
+        service_plugins = {'lb_plugin_name':
+                               test_db_loadbalancer.DB_LB_PLUGIN_KLASS}
+        lbaas_provider=(constants.LOADBALANCER + ':lbaas:' +
+                        MN_DRIVER_KLASS + ':default')
+        cfg.CONF.set_override('service_provider',
+                              [lbaas_provider],
+                              'service_providers')
+        super(LoadbalancerClusterTestCase, self).setUp(
+            service_plugins=service_plugins)
 
 
 class LoadbalancerApiTestCase(LoadbalancerTestCase,
                               test_mn_api.MidonetPluginApiV2TestCase):
 
-    pass
+    def setUp(self, core_plugin=None, lb_plugin=None, lbaas_provider=None,
+              ext_mgr=None):
+        super(LoadbalancerApiTestCase, self).setUp(
+            service_plugins=None)

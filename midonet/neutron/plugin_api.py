@@ -57,9 +57,8 @@ class MidonetApiMixin(agentschedulers_db.DhcpAgentSchedulerDbMixin,
                       external_net_db.External_net_db_mixin,
                       extradhcpopt_db.ExtraDhcpOptMixin,
                       extraroute_db.ExtraRoute_db_mixin,
-                      l3_gwmode_db.L3_NAT_db_mixin,
                       loadbalancer_db.LoadBalancerPluginDb,
-                      mn_lb_db.LoadBalancerMixin,
+                      l3_gwmode_db.L3_NAT_db_mixin,
                       portbindings_db.PortBindingMixin,
                       securitygroups_db.SecurityGroupDbMixin):
 
